@@ -1,10 +1,12 @@
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
-
+import concurrent.futures
 from config import settings
 from database import engine, get_db
 import models
 import services
+import scraper
+import llm
 
 
 models.Base.metadata.create_all(bind=engine)
@@ -29,6 +31,20 @@ def health_check():
         "gdelt_source": settings.gdelt_api_url
     }
 
+def process_article(article_item):
+    """
+    Funkcja pomocnicza. Działa w osobnym wątku.
+    Pobiera treść artykułu i odpytuje lokalny model LLM.
+    """
+    article_text = scraper.scrape_article_text(article_item.url)
+    ai_summary = llm.summarize_article(article_text)
+    
+    return {
+        "title": article_item.title,
+        "url": article_item.url,
+        "llm_summary": ai_summary
+    }
+
 @app.post("/fetch-news")
 def fetch_and_save_news(db: Session = Depends(get_db)):
     """
@@ -42,26 +58,29 @@ def fetch_and_save_news(db: Session = Depends(get_db)):
     
     saved_count = 0
     
-    # 2. Przechodzimy pętlą po każdym pobranym artykule
-    for article_item in articles_data:
-        
-        # 3. Zamieniamy model Pydantic na model bazy danych SQLAlchemy
+    processed_articles = []
+    
+    # 2. Równoległe pobieranie i przetwarzanie przez LLM w 5 wątkach (koncepcja z Lab 2)
+    # Znacznie przyśpieszy to generowanie jeśli mamy np. 50 artykułów
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        results = executor.map(process_article, articles_data)
+        for res in results:
+            if res:
+                processed_articles.append(res)
+                
+    # 3. Sekwencyjny zapis do bazy danych (aby zachować bezpieczeństwo sesji SQLAlchemy)
+    for data in processed_articles:
         db_article = models.Article(
-            title=article_item.title,
-            url=article_item.url
+            title=data["title"],
+            url=data["url"],
+            llm_summary=data["llm_summary"]
         )
         
-        # 4. Kolejkujemy artykuł do zapisu
         db.add(db_article)
-        
-        # 5. Próbujemy go fizycznie zapisać (commit)
         try:
             db.commit()
             saved_count += 1
         except Exception:
-            # W pliku models.py ustawiliśmy unique=True na polu url.
-            # Jeżeli próbujemy zapisać ten sam artykuł drugi raz, 
-            # baza wyrzuci błąd. Musimy wycofać wtedy transakcję (rollback).
             db.rollback()
 
     # Zwracamy odpowiedź w formacie JSON
