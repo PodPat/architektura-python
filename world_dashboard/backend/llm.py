@@ -1,6 +1,6 @@
 import ollama
 
-def summarize_article(article_text: str) -> str:
+async def summarize_article(article_text: str) -> str:
     """
     Wysyła tekst artykułu do lokalnego modelu (Qwen 2.5 14B) 
     z prośbą o krótkie podsumowanie i wskazanie lokalizacji.
@@ -18,7 +18,8 @@ def summarize_article(article_text: str) -> str:
     """
 
     try:
-        response = ollama.generate(
+        client = ollama.AsyncClient()
+        response = await client.generate(
             model='gemma2',
             prompt=prompt
         )

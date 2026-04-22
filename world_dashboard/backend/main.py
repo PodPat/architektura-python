@@ -1,20 +1,45 @@
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
-import concurrent.futures
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import time
+from functools import wraps
+import asyncio
+
 from config import settings
-from database import engine, get_db
+from database import engine, get_db, SessionLocal
 import models
 import services
 import scraper
 import llm
 
 
+async def scheduled_fetch():
+    """Funkcja uruchamiana automatycznie w tle. Tworzy własną sesję DB."""
+    db = SessionLocal()
+    try:
+        await run_fetch_pipeline(db)
+    finally:
+        db.close()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Wykonuje się podczas startu serwera
+    scheduler = AsyncIOScheduler()
+    # Uruchamiamy zadanie w tle (np. co 15 minut)
+    scheduler.add_job(scheduled_fetch, 'interval', minutes=15)
+    scheduler.start()
+    yield
+    # Wykonuje się podczas wyłączania serwera
+    scheduler.shutdown()
+
 models.Base.metadata.create_all(bind=engine)
 # Inicjalizacja głównej instancji aplikacji FastAPI
 app = FastAPI(
     title="World Dashboard API",
     description="Backend agregujący dane ze świata",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Nawiązanie do Lab 1: Używamy wzorca Dekorator, aby powiązać 
@@ -31,13 +56,28 @@ def health_check():
         "gdelt_source": settings.gdelt_api_url
     }
 
-def process_article(article_item):
+def measure_execution_time(func):
     """
-    Funkcja pomocnicza. Działa w osobnym wątku.
+    Dekorator mierzący czas wykonania funkcji asynchronicznych.
+    """
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = await func(*args, **kwargs)
+        end_time = time.time()
+        duration = end_time - start_time
+        print(f"⏱️ [Timer] Funkcja '{func.__name__}' wykonała się w {duration:.2f} sekund.")
+        return result
+    return wrapper
+
+@measure_execution_time
+async def process_article(article_item):
+    """
+    Funkcja pomocnicza. Działa asynchronicznie.
     Pobiera treść artykułu i odpytuje lokalny model LLM.
     """
-    article_text = scraper.scrape_article_text(article_item.url)
-    ai_summary = llm.summarize_article(article_text)
+    article_text = await scraper.scrape_article_text(article_item.url)
+    ai_summary = await llm.summarize_article(article_text)
     
     return {
         "title": article_item.title,
@@ -45,45 +85,62 @@ def process_article(article_item):
         "llm_summary": ai_summary
     }
 
-@app.post("/fetch-news")
-def fetch_and_save_news(db: Session = Depends(get_db)):
+@measure_execution_time
+async def run_fetch_pipeline(db: Session):
     """
-    Endpoint pobierający dane z GDELT i zapisujący je do bazy SQLite.
-    Używamy "Wstrzykiwania Zależności" (Depends), dzięki czemu FastAPI 
-    samo otwiera i zamyka połączenie (sesję) z bazą danych przy każdym zapytaniu.
+    Niezależna logika pobierania danych. Używana zarówno przez API jak i Scheduler.
     """
+    articles_data = await services.fetch_latest_news_from_gdelt()
+    if not articles_data:
+        return 0
+
+    # OPTYMALIZACJA 1: Wczesne filtrowanie duplikatów (operacja blokująca, na bazie SQLite)
+    incoming_urls = [article.url for article in articles_data]
+    existing_urls = db.query(models.Article.url).filter(models.Article.url.in_(incoming_urls)).all()
+    existing_urls_set = {url[0] for url in existing_urls}
     
-    # 1. Pobieramy zweryfikowane dane za pomocą naszego serwisu
-    articles_data = services.fetch_latest_news_from_gdelt()
+    new_articles = [a for a in articles_data if a.url not in existing_urls_set]
     
-    saved_count = 0
+    if not new_articles:
+        print("Wszystkie pobrane artykuły są już w bazie. Pomijam analizę AI.")
+        return 0
+        
+    print(f"Znaleziono {len(new_articles)} nowych artykułów do przeanalizowania przez AI.")
     
-    processed_articles = []
+    # Asynchroniczne przetwarzanie wszystkich nowych artykułów naraz
+    tasks = [process_article(article) for article in new_articles]
+    results = await asyncio.gather(*tasks)
     
-    # 2. Równoległe pobieranie i przetwarzanie przez LLM w 5 wątkach (koncepcja z Lab 2)
-    # Znacznie przyśpieszy to generowanie jeśli mamy np. 50 artykułów
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        results = executor.map(process_article, articles_data)
-        for res in results:
-            if res:
-                processed_articles.append(res)
+    processed_articles = [res for res in results if res]
                 
-    # 3. Sekwencyjny zapis do bazy danych (aby zachować bezpieczeństwo sesji SQLAlchemy)
+    # OPTYMALIZACJA 2: Zapis Wsadowy (Bulk Insert)
+    db_articles = []
     for data in processed_articles:
-        db_article = models.Article(
+        db_articles.append(models.Article(
             title=data["title"],
             url=data["url"],
             llm_summary=data["llm_summary"]
-        )
+        ))
         
-        db.add(db_article)
+    if db_articles:
+        db.add_all(db_articles)
         try:
             db.commit()
-            saved_count += 1
-        except Exception:
+            return len(db_articles)
+        except Exception as e:
             db.rollback()
+            print(f"Błąd podczas zapisu do bazy: {e}")
+            return 0
+            
+    return 0
 
-    # Zwracamy odpowiedź w formacie JSON
+
+@app.post("/fetch-news")
+async def fetch_and_save_news(db: Session = Depends(get_db)):
+    """
+    Ręczne wywołanie pobierania przez użytkownika API.
+    """
+    saved_count = await run_fetch_pipeline(db)
     return {
         "status": "ok", 
         "message": f"Zapisano {saved_count} nowych artykułów do bazy!"
