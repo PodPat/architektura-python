@@ -11,7 +11,7 @@ async def fetch_latest_news_from_gdelt():
         "query": "(domain:bbc.com OR domain:reuters.com OR domain:cnn.com OR domain:theguardian.com) (sourcelang:english OR sourcelang:polish)",
         "mode": "artlist",
         "format": "json",
-        "maxrecords": 10
+        "maxrecords": 5
     }
     
     headers = {

@@ -77,12 +77,18 @@ async def process_article(article_item):
     Pobiera treść artykułu i odpytuje lokalny model LLM.
     """
     article_text = await scraper.scrape_article_text(article_item.url)
-    ai_summary = await llm.summarize_article(article_text)
+    ai_result = await llm.summarize_article(article_text)
     
     return {
         "title": article_item.title,
         "url": article_item.url,
-        "llm_summary": ai_summary
+        "domain": article_item.domain,
+        "seendate": article_item.seendate,
+        "llm_summary": ai_result["summary"],
+        "location": ai_result["location"],
+        "sentiment": ai_result["sentiment"],
+        "category": ai_result["category"],
+        "key_figures": ai_result["key_figures"]
     }
 
 @measure_execution_time
@@ -119,7 +125,13 @@ async def run_fetch_pipeline(db: Session):
         db_articles.append(models.Article(
             title=data["title"],
             url=data["url"],
-            llm_summary=data["llm_summary"]
+            domain=data["domain"],
+            seendate=data["seendate"],
+            llm_summary=data["llm_summary"],
+            location=data["location"],
+            sentiment=data["sentiment"],
+            category=data["category"],
+            key_figures=data["key_figures"]
         ))
         
     if db_articles:
