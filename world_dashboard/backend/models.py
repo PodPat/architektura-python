@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, Text
 from database import Base
 
 class Article(Base):
@@ -16,5 +16,7 @@ class Article(Base):
     sentiment = Column(String, nullable=True)
     category = Column(String, nullable=True)
     key_figures = Column(String, nullable=True)
+    embedding = Column(Text, nullable=True)      # JSON embedding wektora
+    cluster_id = Column(Integer, nullable=True)  # ID grupy tematycznej
 
 

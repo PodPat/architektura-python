@@ -1,7 +1,7 @@
 import ollama
 import json
 
-async def summarize_article(article_text: str) -> dict:
+async def summarize_article(article_text: str, title: str = "") -> dict:
     """
     Wysyła tekst artykułu do lokalnego modelu z prośbą o analitykę.
     """
@@ -15,16 +15,26 @@ async def summarize_article(article_text: str) -> dict:
         }
 
     prompt = f"""
-    Jesteś profesjonalnym analitykiem wiadomości. Przeczytaj poniższy artykuł i zwróć wynik WYŁĄCZNIE jako obiekt JSON z następującymi kluczami:
-    - "summary": Streszczenie (4-5 zdania w języku polskim)
-    - "location": Państwo, którego dotyczy tekst. Podaj jedną główną lokalizację, jeśli tekst nie dotyczy konkretnej lokalizacji wpisz 'Globalne'.
-    - "sentiment": Wydźwięk artykułu. Wybierz jedną opcję: 'Pozytywny', 'Negatywny' lub 'Neutralny'.
-    - "category": Kategoria artykułu. Wybierz jedną z: 'Polityka', 'Gospodarka', 'Klimat', 'Konflikty', 'Technologia', lub 'Inne'.
-    - "key_figures": Główne postacie lub organizacje (zwróć jako jeden tekst, połączone przecinkami).
+    Jesteś profesjonalnym analitykiem wiadomości. Przeczytaj tytuł i treść artykułu, a następnie zwróć wynik WYŁĄCZNIE jako obiekt JSON.
 
-    Nie dodawaj żadnego innego tekstu, tagów markdown ani komentarzy, zwróć czysty JSON.
-    
-    Tekst artykułu:
+    TYTUŁ: {title}
+
+    ZASADY DLA POLA "location":
+    - Podaj JEDNO konkretne państwo w języku polskim (np. "Polska", "Stany Zjednoczone", "Ukraina", "Niemcy").
+    - Jeśli tytuł zawiera skrót "USA" lub "Stany Zjednoczone" — wpisz "Stany Zjednoczone".
+    - Jeśli artykuł dotyczy kilku krajów, wybierz ten, o którym mówi GŁÓWNY wątek.
+    - Wpisz "Globalne" TYLKO gdy artykuł naprawdę nie dotyczy żadnego konkretnego państwa (np. raporty ONZ, globalne statystyki klimatyczne).
+
+    Zwróć JSON z kluczami:
+    - "summary": Streszczenie 4-5 zdań po polsku
+    - "location": Państwo (po polsku) lub "Globalne"
+    - "sentiment": "Pozytywny", "Negatywny" lub "Neutralny"
+    - "category": "Polityka", "Gospodarka", "Klimat", "Konflikty", "Technologia", lub "Inne"
+    - "key_figures": Główne postacie lub organizacje (tekst, przecinki)
+
+    Nie dodawaj żadnego innego tekstu ani tagów markdown. Zwróć czysty JSON.
+
+    TREŚĆ ARTYKUŁU:
     {article_text}
     """
 

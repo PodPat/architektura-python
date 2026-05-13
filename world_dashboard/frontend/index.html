@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>World Dashboard — Mapa Wydarzeń</title>
+  <meta name="description" content="Interaktywna mapa świata z newsami pobieranymi i analizowanymi przez AI." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #080c16;
+      --surface:   #0d1428;
+      --surface2:  #121a30;
+      --border:    #1e2d50;
+      --accent:    #3b82f6;
+      --accent2:   #60a5fa;
+      --glow:      #3b82f640;
+      --text:      #e2e8f0;
+      --text-dim:  #64748b;
+      --positive:  #22d3ee;
+      --negative:  #f87171;
+      --neutral:   #94a3b8;
+      --map-base:  #0f1e3c;
+      --map-hover: #1e3a6e;
+      --map-active:#1d4ed8;
+      --map-hot:   #2563eb;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+    }
+
+    /* ── HEADER ───────────────────────────────────── */
+    header {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      height: 56px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 24px;
+      background: rgba(8,12,22,0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+    .logo {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 700; font-size: 16px; letter-spacing: 0.5px;
+    }
+    .logo-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: 0.6; transform: scale(0.7); }
+    }
+    .header-info {
+      display: flex; align-items: center; gap: 20px;
+      font-size: 13px; color: var(--text-dim);
+    }
+    .stat-pill {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 12px; font-weight: 500;
+      color: var(--accent2);
+    }
+    .btn-refresh {
+      background: var(--accent);
+      border: none; border-radius: 8px;
+      padding: 6px 14px;
+      font-size: 12px; font-weight: 600; color: #fff;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-refresh:hover { background: #2563eb; transform: translateY(-1px); box-shadow: 0 4px 12px var(--glow); }
+    .btn-refresh:active { transform: none; }
+    .btn-refresh.loading { opacity: 0.7; cursor: not-allowed; }
+
+    /* ── LAYOUT ───────────────────────────────────── */
+    .layout {
+      position: fixed;
+      top: 56px; left: 0; right: 0; bottom: 0;
+      display: flex;
+    }
+
+    /* ── MAP AREA ─────────────────────────────────── */
+    .map-area {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    #map-svg {
+      width: 100%; height: 100%;
+    }
+    .country {
+      fill: var(--map-base);
+      stroke: #0a1428;
+      stroke-width: 0.5px;
+      cursor: pointer;
+      transition: fill 0.2s;
+    }
+    .country.has-news {
+      fill: var(--map-active);
+      filter: drop-shadow(0 0 4px rgba(59,130,246,0.4));
+    }
+    .country.has-news:hover {
+      fill: var(--accent2);
+      filter: drop-shadow(0 0 10px rgba(96,165,250,0.6));
+    }
+    .country:not(.has-news):hover {
+      fill: var(--map-hover);
+    }
+    /* Oceans/Sphere */
+    .sphere { fill: #060b18; }
+    .graticule { fill: none; stroke: #0d1e38; stroke-width: 0.3px; }
+
+    /* ── TOOLTIP ──────────────────────────────────── */
+    #tooltip {
+      position: fixed;
+      z-index: 200;
+      pointer-events: none;
+      max-width: 320px;
+      background: rgba(13,20,40,0.95);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(59,130,246,0.1);
+      display: none;
+      animation: fadeIn 0.15s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .tooltip-country {
+      font-size: 14px; font-weight: 700;
+      margin-bottom: 10px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .tooltip-count {
+      font-size: 11px; font-weight: 500;
+      background: var(--accent);
+      border-radius: 20px;
+      padding: 2px 8px;
+      color: #fff;
+    }
+    .tooltip-article {
+      padding: 8px 0;
+      border-top: 1px solid var(--border);
+    }
+    .tooltip-article:first-of-type { border-top: none; }
+    .tooltip-title {
+      font-size: 12px; font-weight: 500; line-height: 1.4;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .tooltip-summary {
+      font-size: 11px; color: var(--text-dim); line-height: 1.5;
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .sentiment-badge {
+      display: inline-block;
+      font-size: 10px; font-weight: 600;
+      border-radius: 4px;
+      padding: 1px 6px;
+      margin-top: 4px;
+    }
+    .sentiment-badge.Pozytywny  { background: rgba(34,211,238,0.15); color: var(--positive); }
+    .sentiment-badge.Negatywny  { background: rgba(248,113,113,0.15); color: var(--negative); }
+    .sentiment-badge.Neutralny  { background: rgba(148,163,184,0.15); color: var(--neutral); }
+    .tooltip-more {
+      font-size: 11px; color: var(--accent2);
+      margin-top: 8px; text-align: center;
+    }
+
+    /* ── SIDEBAR ──────────────────────────────────── */
+    .sidebar {
+      width: 320px;
+      display: flex; flex-direction: column;
+      border-left: 1px solid var(--border);
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .sidebar-header {
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .sidebar-title {
+      font-size: 13px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1px;
+      color: var(--accent2);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .globe-icon { font-size: 16px; }
+    .sidebar-subtitle {
+      font-size: 11px; color: var(--text-dim); margin-top: 4px;
+    }
+    .sidebar-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+    .sidebar-body::-webkit-scrollbar { width: 4px; }
+    .sidebar-body::-webkit-scrollbar-track { background: transparent; }
+    .sidebar-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    /* ── GLOBAL CARD ─────────────────────────────── */
+    .global-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .global-card:hover {
+      border-color: var(--accent);
+      background: rgba(59,130,246,0.07);
+      transform: translateX(2px);
+    }
+    .card-category {
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--accent2); margin-bottom: 6px;
+    }
+    .card-title {
+      font-size: 12px; font-weight: 500; line-height: 1.45;
+      color: var(--text); margin-bottom: 6px;
+    }
+    .card-summary {
+      font-size: 11px; color: var(--text-dim); line-height: 1.5;
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .card-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 8px;
+    }
+
+    /* ── EMPTY / LOADING STATES ───────────────────── */
+    .state-msg {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 12px;
+      padding: 24px 0;
+    }
+
+    /* ── COUNTRY DETAIL PANEL ─────────────────────── */
+    .country.selected {
+      fill: #f59e0b !important;
+      filter: drop-shadow(0 0 14px rgba(245,158,11,0.8)) !important;
+    }
+    .btn-back {
+      display: flex; align-items: center; gap: 6px;
+      background: none; border: 1px solid var(--border);
+      border-radius: 8px; padding: 5px 10px;
+      font-size: 11px; font-weight: 500; color: var(--text-dim);
+      cursor: pointer; transition: all 0.2s; margin-bottom: 10px; width: fit-content;
+    }
+    .btn-back:hover { border-color: var(--accent); color: var(--accent2); }
+    .detail-country-name { font-size: 16px; font-weight: 700; margin-bottom: 2px; }
+    .detail-count { font-size: 11px; color: var(--text-dim); }
+    .detail-article {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px; margin-bottom: 10px; transition: all 0.2s;
+    }
+    .detail-article:hover { border-color: var(--accent); background: rgba(59,130,246,0.06); }
+    .detail-title {
+      font-size: 12px; font-weight: 600; line-height: 1.45;
+      color: var(--accent2); text-decoration: none; display: block; margin-bottom: 6px;
+    }
+    .detail-title:hover { text-decoration: underline; }
+    .detail-summary { font-size: 11px; color: var(--text-dim); line-height: 1.6; margin-bottom: 8px; }
+    .detail-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+    /* ── CATEGORY CHIPS ────────────────────────── */
+    .cat-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px; padding: 4px 0;
+    }
+    .cat-chip {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+    }
+    .cat-chip:hover {
+      border-color: var(--accent);
+      background: rgba(59,130,246,0.1);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(59,130,246,0.15);
+    }
+    .cat-chip-emoji { font-size: 22px; }
+    .cat-chip-name  { font-size: 11px; font-weight: 600; color: var(--text); }
+    .cat-chip-count {
+      font-size: 10px; font-weight: 700;
+      background: var(--accent);
+      color: #fff; border-radius: 20px;
+      padding: 1px 7px;
+    }
+    .btn-cat-back {
+      display: flex; align-items: center; gap: 6px;
+      background: none; border: 1px solid var(--border);
+      border-radius: 8px; padding: 5px 10px;
+      font-size: 11px; font-weight: 500; color: var(--text-dim);
+      cursor: pointer; transition: all 0.2s; margin-bottom: 10px; width: fit-content;
+    }
+    .btn-cat-back:hover { border-color: var(--accent2); color: var(--accent2); }
+    .active-cat-label {
+      font-size: 12px; color: var(--accent2); font-weight: 600;
+      margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
+    }
+
+    /* ── LEGEND ───────────────────────────────────── */
+    .legend {
+      position: absolute;
+      bottom: 24px; left: 24px;
+      background: rgba(13,20,40,0.85);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      backdrop-filter: blur(10px);
+      font-size: 11px;
+    }
+    .legend-title { font-weight: 600; color: var(--text-dim); margin-bottom: 8px; }
+    .legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .legend-swatch { width: 14px; height: 14px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    World Dashboard
+  </div>
+  <div class="header-info">
+    <span class="stat-pill" id="total-count">Ładowanie…</span>
+    <span id="last-updated" style="font-size:11px"></span>
+    <button class="btn-refresh" id="btn-refresh" onclick="loadData()">↻ Odśwież</button>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="map-area">
+    <svg id="map-svg"></svg>
+    <div class="legend">
+      <div class="legend-title">Legenda</div>
+      <div class="legend-row"><div class="legend-swatch" style="background:#0f1e3c;border:1px solid #1e2d50"></div> Brak newsów</div>
+      <div class="legend-row"><div class="legend-swatch" style="background:#1d4ed8"></div> Ma newsy</div>
+      <div class="legend-row"><div class="legend-swatch" style="background:#60a5fa"></div> Hover</div>
+    </div>
+  </div>
+  <div class="sidebar">
+    <div id="view-global" style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+      <div class="sidebar-header">
+        <div class="sidebar-title"><span class="globe-icon">🌍</span> Globalne</div>
+        <div class="sidebar-subtitle">Wydarzenia bez przypisanego państwa</div>
+      </div>
+      <div class="sidebar-body" id="global-list"><div class="state-msg">Ładowanie…</div></div>
+    </div>
+    <div id="view-country" style="display:none;flex-direction:column;height:100%;overflow:hidden;">
+      <div class="sidebar-header">
+        <button class="btn-back" onclick="showGlobalView()">← Powrót</button>
+        <div class="detail-country-name" id="detail-name"></div>
+        <div class="detail-count" id="detail-count"></div>
+      </div>
+      <!-- krok 1: wybor kategorii -->
+      <div class="sidebar-body" id="view-cats"></div>
+      <!-- krok 2: artykuly w kategorii -->
+      <div id="view-articles" style="display:none;flex-direction:column;height:100%;overflow:hidden;">
+        <div style="padding:12px 12px 0;flex-shrink:0;">
+          <button class="btn-cat-back" onclick="showCategoryStep()">← Kategorie</button>
+          <div class="active-cat-label" id="active-cat-label"></div>
+        </div>
+        <div class="sidebar-body" id="detail-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+// ── STAŁE ─────────────────────────────────────────────────────────────────
+const API = 'http://localhost:8000/articles/by-location';
+
+// Mapowanie polskich nazw lokalizacji → ISO numeric (używane przez world-atlas)
+const LOCATION_MAP = {
+  // Europa
+  'Polska': 616, 'Niemcy': 276, 'Francja': 250, 'Wielka Brytania': 826,
+  'Włochy': 380, 'Hiszpania': 724, 'Portugalia': 620, 'Holandia': 528,
+  'Niderlandy': 528, 'Belgia': 56, 'Szwajcaria': 756, 'Austria': 40,
+  'Czechy': 203, 'Słowacja': 703, 'Węgry': 348, 'Rumunia': 642,
+  'Bułgaria': 100, 'Grecja': 300, 'Chorwacja': 191, 'Serbia': 688,
+  'Słowenia': 705, 'Szwecja': 752, 'Norwegia': 578, 'Finlandia': 246,
+  'Dania': 208, 'Irlandia': 372, 'Ukraina': 804, 'Białoruś': 112,
+  'Mołdawia': 498, 'Litwa': 440, 'Łotwa': 428, 'Estonia': 233,
+  'Albania': 8, 'Bośnia i Hercegowina': 70, 'Macedonia Północna': 807,
+  'Kosowo': 383, 'Czarnogóra': 499, 'Luksemburg': 442, 'Islandia': 352,
+  // Ameryki
+  'Stany Zjednoczone': 840, 'USA': 840, 'Kanada': 124, 'Meksyk': 484,
+  'Brazylia': 76, 'Argentyna': 32, 'Chile': 152, 'Kolumbia': 170,
+  'Peru': 604, 'Wenezuela': 862, 'Ekwador': 218, 'Boliwia': 68,
+  'Urugwaj': 858, 'Paragwaj': 600, 'Kuba': 192, 'Jamajka': 388,
+  // Azja
+  'Rosja': 643, 'Chiny': 156, 'Japonia': 392, 'Korea Południowa': 410,
+  'Korea Północna': 408, 'Indie': 356, 'Pakistan': 586, 'Bangladesz': 50,
+  'Afganistan': 4, 'Iran': 364, 'Irak': 368, 'Syria': 760,
+  'Turcja': 792, 'Arabia Saudyjska': 682, 'ZEA': 784,
+  'Zjednoczone Emiraty Arabskie': 784, 'Izrael': 376, 'Palestyna': 275,
+  'Jemen': 887, 'Oman': 512, 'Katar': 634, 'Kuwejt': 414,
+  'Jordania': 400, 'Liban': 422, 'Kazachstan': 398, 'Uzbekistan': 860,
+  'Tajlandia': 764, 'Wietnam': 704, 'Indonezja': 360, 'Filipiny': 608,
+  'Malezja': 458, 'Myanmar': 104, 'Kambodża': 116, 'Laos': 418,
+  'Mongolia': 496, 'Nepal': 524, 'Sri Lanka': 144,
+  // Afryka
+  'Egipt': 818, 'Nigeria': 566, 'Etiopia': 231, 'Kenia': 404,
+  'Tanzania': 834, 'Ghana': 288, 'RPA': 710,
+  'Republika Południowej Afryki': 710, 'Maroko': 504, 'Algieria': 12,
+  'Tunezja': 788, 'Libya': 434, 'Libia': 434, 'Sudan': 729,
+  'Somalia': 706, 'Mali': 466, 'Niger': 562, 'Czad': 148,
+  'Kamerun': 120, 'Kongo': 180, 'Angola': 24, 'Mozambik': 508,
+  'Zimbabwe': 716, 'Zambia': 894, 'Uganda': 800, 'Rwanda': 646,
+  // Oceania
+  'Australia': 36, 'Nowa Zelandia': 554, 'Papua Nowa Gwinea': 598,
+  // Inne regiony
+  'Antarktyda': 10,
+};
+
+// Kategorie → emoji
+const CAT_EMOJI = {
+  'Polityka': '🏛️', 'Gospodarka': '📈', 'Konflikty': '⚔️',
+  'Klimat': '🌿', 'Nauka': '🔬', 'Sport': '⚽', 'Kultura': '🎭',
+  'Zdrowie': '🏥', 'Technologia': '💻', 'Inne': '📰',
+};
+
+// Sentyment → kolor CSS klasy
+const SENTIMENT_CLASS = {
+  'Pozytywny': 'Pozytywny', 'Negatywny': 'Negatywny', 'Neutralny': 'Neutralny',
+};
+
+// ── STAN ──────────────────────────────────────────────────────────────────
+let articlesByLocation = {};
+// iso-numeric → [articles]
+let byIso = {};
+
+// ── MAPA ──────────────────────────────────────────────────────────────────
+const svg = d3.select('#map-svg');
+let width, height, projection, path;
+
+function initProjection() {
+  width  = svg.node().clientWidth;
+  height = svg.node().clientHeight;
+  projection = d3.geoNaturalEarth1()
+    .scale(width / 6.2)
+    .translate([width / 2, height / 2]);
+  path = d3.geoPath().projection(projection);
+}
+
+async function drawMap() {
+  initProjection();
+  svg.selectAll('*').remove();
+
+  const world = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+  const countries = topojson.feature(world, world.objects.countries);
+
+  svg.append('path')
+    .datum({type:'Sphere'})
+    .attr('class','sphere')
+    .attr('d', path);
+
+  svg.append('path')
+    .datum(d3.geoGraticule()())
+    .attr('class','graticule')
+    .attr('d', path);
+
+  svg.selectAll('.country')
+    .data(countries.features)
+    .join('path')
+    .attr('class', d => {
+      const iso = +d.id;
+      return byIso[iso] ? 'country has-news' : 'country';
+    })
+    .attr('d', path)
+    .on('mousemove', onCountryHover)
+    .on('mouseleave', () => { document.getElementById('tooltip').style.display='none'; })
+    .on('click', onCountryClick);
+}
+
+// ── TOOLTIP ───────────────────────────────────────────────────────────────
+function onCountryHover(event, d) {
+  const iso = +d.id;
+  const articles = byIso[iso];
+  if (!articles || articles.length === 0) {
+    document.getElementById('tooltip').style.display = 'none';
+    return;
+  }
+
+  const name = getCountryName(iso);
+  const tip  = document.getElementById('tooltip');
+  const max  = 3;
+  const shown = articles.slice(0, max);
+  const rest  = articles.length - max;
+
+  tip.innerHTML = `
+    <div class="tooltip-country">
+      ${name} <span class="tooltip-count">${articles.length} ${articles.length === 1 ? 'news' : 'newsów'}</span>
+    </div>
+    ${shown.map(a => `
+      <div class="tooltip-article">
+        <div class="tooltip-title">${a.title}</div>
+        <div class="tooltip-summary">${a.summary || 'Brak podsumowania.'}</div>
+        <span class="sentiment-badge ${SENTIMENT_CLASS[a.sentiment] || 'Neutralny'}">${a.sentiment || 'Neutralny'}</span>
+      </div>
+    `).join('')}
+    ${rest > 0 ? `<div class="tooltip-more">+${rest} więcej artykułów</div>` : ''}
+  `;
+
+  // Pozycjonowanie tooltipa
+  const tw = 320, th = tip.scrollHeight || 200;
+  let x = event.clientX + 14;
+  let y = event.clientY + 14;
+  if (x + tw > window.innerWidth  - 10) x = event.clientX - tw - 14;
+  if (y + th > window.innerHeight - 10) y = event.clientY - th - 14;
+  tip.style.left    = x + 'px';
+  tip.style.top     = y + 'px';
+  tip.style.display = 'block';
+}
+
+function getCountryName(isoNum) {
+  const entry = Object.entries(LOCATION_MAP).find(([,v]) => v === isoNum);
+  return entry ? entry[0] : `Kraj #${isoNum}`;
+}
+
+// ── KLIK W KRAJ ───────────────────────────────────────────────────────────
+let currentArticles = [];
+
+function onCountryClick(event, d) {
+  const iso = +d.id;
+  const articles = byIso[iso];
+  if (!articles || articles.length === 0) return;
+  document.getElementById('tooltip').style.display = 'none';
+  svg.selectAll('.country').classed('selected', false);
+  d3.select(event.currentTarget).classed('selected', true);
+  currentArticles = articles;
+
+  const name = getCountryName(iso);
+  document.getElementById('detail-name').textContent = name;
+  document.getElementById('detail-count').textContent =
+    `${articles.length} ${articles.length === 1 ? 'artykuł' : 'artykułów'}`;
+
+  // Krok 1: pokaż wybor kategorii
+  showCategoryStep();
+  document.getElementById('view-global').style.display = 'none';
+  document.getElementById('view-country').style.display = 'flex';
+}
+
+function showCategoryStep() {
+  // Zlicz artykuly per kategoria
+  const counts = {};
+  for (const a of currentArticles) {
+    const cat = a.category || 'Inne';
+    counts[cat] = (counts[cat] || 0) + 1;
+  }
+
+  const chips = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([cat, cnt]) => `
+      <div class="cat-chip" onclick="showCategoryArticles('${cat}')">
+        <span class="cat-chip-emoji">${CAT_EMOJI[cat] || '📰'}</span>
+        <span class="cat-chip-name">${cat}</span>
+        <span class="cat-chip-count">${cnt}</span>
+      </div>
+    `).join('');
+
+  document.getElementById('view-cats').innerHTML =
+    `<div class="cat-grid">${chips}</div>`;
+
+  document.getElementById('view-cats').style.display = 'block';
+  document.getElementById('view-articles').style.display = 'none';
+}
+
+function showCategoryArticles(category) {
+  const filtered = currentArticles.filter(a => (a.category || 'Inne') === category);
+  document.getElementById('active-cat-label').innerHTML =
+    `${CAT_EMOJI[category] || '📰'} ${category} <span style="color:var(--text-dim);font-weight:400">(${filtered.length})</span>`;
+
+  document.getElementById('detail-list').innerHTML = filtered.map(a => `
+    <div class="detail-article">
+      <a class="detail-title" href="${a.url}" target="_blank">${a.title}</a>
+      <div class="detail-summary">${a.summary || 'Brak podsumowania.'}</div>
+      <div class="detail-meta">
+        <span class="sentiment-badge ${a.sentiment || 'Neutralny'}">${a.sentiment || 'Neutralny'}</span>
+      </div>
+    </div>
+  `).join('');
+
+  document.getElementById('view-cats').style.display = 'none';
+  document.getElementById('view-articles').style.display = 'flex';
+}
+
+function showGlobalView() {
+  document.getElementById('view-global').style.display = 'flex';
+  document.getElementById('view-country').style.display = 'none';
+  svg.selectAll('.country').classed('selected', false);
+}
+
+// ── SIDEBAR GLOBALNYCH ─────────────────────────────────────────────────────
+function renderGlobalSidebar() {
+  const globalKeys = ['Globalne', 'Nieznana', 'Global'];
+  const list = document.getElementById('global-list');
+
+  const articles = globalKeys.flatMap(k => articlesByLocation[k] || []);
+
+  if (articles.length === 0) {
+    list.innerHTML = '<div class="state-msg">Brak globalnych wydarzeń</div>';
+    return;
+  }
+
+  list.innerHTML = articles.map(a => `
+    <div class="global-card" onclick="window.open('${a.url}','_blank')">
+      <div class="card-category">${CAT_EMOJI[a.category] || '📰'} ${a.category || 'Inne'}</div>
+      <div class="card-title">${a.title}</div>
+      <div class="card-summary">${a.summary || 'Brak podsumowania.'}</div>
+      <div class="card-footer">
+        <span class="sentiment-badge ${SENTIMENT_CLASS[a.sentiment] || 'Neutralny'}">${a.sentiment || 'Neutralny'}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── DANE ───────────────────────────────────────────────────────────────────
+async function loadData() {
+  const btn = document.getElementById('btn-refresh');
+  btn.classList.add('loading');
+  btn.textContent = '↻ Ładowanie…';
+
+  try {
+    const res  = await fetch(API);
+    articlesByLocation = await res.json();
+
+    // Przelicz byIso
+    byIso = {};
+    let total = 0;
+    for (const [loc, arts] of Object.entries(articlesByLocation)) {
+      total += arts.length;
+      const iso = LOCATION_MAP[loc];
+      if (iso) {
+        if (!byIso[iso]) byIso[iso] = [];
+        byIso[iso].push(...arts);
+      }
+    }
+
+    document.getElementById('total-count').textContent = `${total} artykułów`;
+    document.getElementById('last-updated').textContent =
+      'Odświeżono: ' + new Date().toLocaleTimeString('pl-PL');
+
+    // Odśwież mapę i sidebar
+    await drawMap();
+    renderGlobalSidebar();
+  } catch(e) {
+    console.error('Błąd pobierania danych:', e);
+    document.getElementById('total-count').textContent = 'Błąd połączenia z API';
+  } finally {
+    btn.classList.remove('loading');
+    btn.textContent = '↻ Odśwież';
+  }
+}
+
+// ── INIT ───────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => drawMap());
+loadData();
+// Auto-odświeżanie co 5 minut
+setInterval(loadData, 5 * 60 * 1000);
+</script>
+</body>
+</html>

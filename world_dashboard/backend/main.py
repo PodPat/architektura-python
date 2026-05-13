@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -12,6 +13,7 @@ import models
 import services
 import scraper
 import llm
+import similarity
 
 
 async def scheduled_fetch():
@@ -40,6 +42,13 @@ app = FastAPI(
     description="Backend agregujący dane ze świata",
     version="1.0.0",
     lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Nawiązanie do Lab 1: Używamy wzorca Dekorator, aby powiązać 
@@ -77,7 +86,7 @@ async def process_article(article_item):
     Pobiera treść artykułu i odpytuje lokalny model LLM.
     """
     article_text = await scraper.scrape_article_text(article_item.url)
-    ai_result = await llm.summarize_article(article_text)
+    ai_result = await llm.summarize_article(article_text, title=article_item.title)
     
     return {
         "title": article_item.title,
@@ -138,7 +147,11 @@ async def run_fetch_pipeline(db: Session):
         db.add_all(db_articles)
         try:
             db.commit()
-            return len(db_articles)
+            saved = len(db_articles)
+            # Grupowanie po zapisaniu
+            print("🔍 Uruchamiam similarity clustering...")
+            similarity.assign_clusters(db)
+            return saved
         except Exception as e:
             db.rollback()
             print(f"Błąd podczas zapisu do bazy: {e}")
@@ -157,3 +170,26 @@ async def fetch_and_save_news(db: Session = Depends(get_db)):
         "status": "ok", 
         "message": f"Zapisano {saved_count} nowych artykułów do bazy!"
     }
+
+
+@app.get("/articles/by-location")
+def get_articles_by_location(db: Session = Depends(get_db)):
+    """
+    Zwraca artykuły zgrupowane wg lokalizacji — używane przez frontend mapy.
+    """
+    articles = db.query(models.Article).all()
+    grouped: dict = {}
+    for article in articles:
+        loc = article.location or "Nieznana"
+        if loc not in grouped:
+            grouped[loc] = []
+        grouped[loc].append({
+            "id": article.id,
+            "title": article.title,
+            "summary": article.llm_summary,
+            "sentiment": article.sentiment,
+            "category": article.category,
+            "url": article.url,
+            "cluster_id": article.cluster_id,
+        })
+    return grouped

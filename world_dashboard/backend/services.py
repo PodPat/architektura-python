@@ -8,10 +8,10 @@ async def fetch_latest_news_from_gdelt():
     Pobiera najnowsze artykuły z API GDELT.
     """
     params = {
-        "query": "(domain:bbc.com OR domain:reuters.com OR domain:cnn.com OR domain:theguardian.com) (sourcelang:english OR sourcelang:polish)",
+        "query": "(domain:tvn24.pl OR domain:onet.pl OR domain:wp.pl OR domain:wyborcza.pl OR domain:polsatnews.pl OR domain:rmf24.pl OR domain:tokfm.pl OR domain:cnn.com OR domain:bbc.com OR domain:reuters.com) sourcelang:polish",
         "mode": "artlist",
         "format": "json",
-        "maxrecords": 5
+        "maxrecords": 50
     }
     
     headers = {
