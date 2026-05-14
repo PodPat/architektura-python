@@ -21,9 +21,10 @@ async def summarize_article(article_text: str, title: str = "") -> dict:
 
     ZASADY DLA POLA "location":
     - Podaj JEDNO konkretne państwo w języku polskim (np. "Polska", "Stany Zjednoczone", "Ukraina", "Niemcy").
-    - Jeśli tytuł zawiera skrót "USA" lub "Stany Zjednoczone" — wpisz "Stany Zjednoczone".
-    - Jeśli artykuł dotyczy kilku krajów, wybierz ten, o którym mówi GŁÓWNY wątek.
-    - Wpisz "Globalne" TYLKO gdy artykuł naprawdę nie dotyczy żadnego konkretnego państwa (np. raporty ONZ, globalne statystyki klimatyczne).
+    - Wykorzystaj nazwy miast, regionów, walut (np. GBP -> Wielka Brytania, PLN -> Polska) oraz nazwiska polityków jako kluczowe wskazówki.
+    - Jeśli artykuł dotyczy specyficznych instytucji (np. NHS, Home Office -> Wielka Brytania; NFZ, Sejm -> Polska), przypisz go do odpowiedniego kraju.
+    - Jeśli artykuł dotyczy relacji międzynarodowych, wybierz państwo będące głównym aktorem opisywanej sytuacji.
+    - "Globalne" używaj TYLKO dla tematów o zasięgu ogólnoświatowym (np. globalne ocieplenie, pandemie, astronomia, oceanografia) lub gdy naprawdę brak jakiegokolwiek punktu zaczepienia na mapie.
 
     Zwróć JSON z kluczami:
     - "summary": Streszczenie 4-5 zdań po polsku

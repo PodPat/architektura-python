@@ -379,7 +379,16 @@
         <div class="sidebar-title"><span class="globe-icon">🌍</span> Globalne</div>
         <div class="sidebar-subtitle">Wydarzenia bez przypisanego państwa</div>
       </div>
-      <div class="sidebar-body" id="global-list"><div class="state-msg">Ładowanie…</div></div>
+      <!-- krok 1: wybór kategorii globalnych -->
+      <div class="sidebar-body" id="global-view-cats"></div>
+      <!-- krok 2: lista artykułów globalnych w kategorii -->
+      <div id="global-view-articles" style="display:none;flex-direction:column;height:100%;overflow:hidden;">
+        <div style="padding:12px 12px 0;flex-shrink:0;">
+          <button class="btn-cat-back" onclick="showGlobalCategoryStep()">← Kategorie</button>
+          <div class="active-cat-label" id="active-global-cat-label"></div>
+        </div>
+        <div class="sidebar-body" id="global-list"></div>
+      </div>
     </div>
     <div id="view-country" style="display:none;flex-direction:column;height:100%;overflow:hidden;">
       <div class="sidebar-header">
@@ -629,27 +638,61 @@ function showGlobalView() {
 }
 
 // ── SIDEBAR GLOBALNYCH ─────────────────────────────────────────────────────
+let currentGlobalArticles = [];
+
 function renderGlobalSidebar() {
   const globalKeys = ['Globalne', 'Nieznana', 'Global'];
-  const list = document.getElementById('global-list');
+  currentGlobalArticles = globalKeys.flatMap(k => articlesByLocation[k] || []);
 
-  const articles = globalKeys.flatMap(k => articlesByLocation[k] || []);
-
-  if (articles.length === 0) {
-    list.innerHTML = '<div class="state-msg">Brak globalnych wydarzeń</div>';
+  if (currentGlobalArticles.length === 0) {
+    document.getElementById('global-view-cats').innerHTML = '<div class="state-msg">Brak globalnych wydarzeń</div>';
     return;
   }
 
-  list.innerHTML = articles.map(a => `
-    <div class="global-card" onclick="window.open('${a.url}','_blank')">
-      <div class="card-category">${CAT_EMOJI[a.category] || '📰'} ${a.category || 'Inne'}</div>
-      <div class="card-title">${a.title}</div>
-      <div class="card-summary">${a.summary || 'Brak podsumowania.'}</div>
-      <div class="card-footer">
-        <span class="sentiment-badge ${SENTIMENT_CLASS[a.sentiment] || 'Neutralny'}">${a.sentiment || 'Neutralny'}</span>
+  showGlobalCategoryStep();
+}
+
+function showGlobalCategoryStep() {
+  const counts = {};
+  for (const a of currentGlobalArticles) {
+    const cat = a.category || 'Inne';
+    counts[cat] = (counts[cat] || 0) + 1;
+  }
+
+  const chips = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([cat, cnt]) => `
+      <div class="cat-chip" onclick="showGlobalCategoryArticles('${cat}')">
+        <span class="cat-chip-emoji">${CAT_EMOJI[cat] || '📰'}</span>
+        <span class="cat-chip-name">${cat}</span>
+        <span class="cat-chip-count">${cnt}</span>
+      </div>
+    `).join('');
+
+  document.getElementById('global-view-cats').innerHTML =
+    `<div class="cat-grid">${chips}</div>`;
+
+  document.getElementById('global-view-cats').style.display = 'block';
+  document.getElementById('global-view-articles').style.display = 'none';
+}
+
+function showGlobalCategoryArticles(category) {
+  const filtered = currentGlobalArticles.filter(a => (a.category || 'Inne') === category);
+  document.getElementById('active-global-cat-label').innerHTML =
+    `${CAT_EMOJI[category] || '📰'} ${category} <span style="color:var(--text-dim);font-weight:400">(${filtered.length})</span>`;
+
+  document.getElementById('global-list').innerHTML = filtered.map(a => `
+    <div class="detail-article">
+      <a class="detail-title" href="${a.url}" target="_blank">${a.title}</a>
+      <div class="detail-summary">${a.summary || 'Brak podsumowania.'}</div>
+      <div class="detail-meta">
+        <span class="sentiment-badge ${a.sentiment || 'Neutralny'}">${a.sentiment || 'Neutralny'}</span>
       </div>
     </div>
   `).join('');
+
+  document.getElementById('global-view-cats').style.display = 'none';
+  document.getElementById('global-view-articles').style.display = 'flex';
 }
 
 // ── DANE ───────────────────────────────────────────────────────────────────
