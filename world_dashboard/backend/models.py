@@ -19,4 +19,10 @@ class Article(Base):
     embedding = Column(Text, nullable=True)      # JSON embedding wektora
     cluster_id = Column(Integer, nullable=True)  # ID grupy tematycznej
 
+    # NOWE KOLUMNY CAMEO
+    event_code = Column(String, nullable=True)
+    event_root_code = Column(String, nullable=True)
+    quad_class = Column(Integer, nullable=True)
+    num_mentions = Column(Integer, default=0)
+
 

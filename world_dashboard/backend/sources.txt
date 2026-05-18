@@ -1,0 +1,60 @@
+# ==========================================
+# Lista źródeł monitorowanych przez GDELT
+# ==========================================
+# Dodaj jedną domenę na linię. 
+# Linie zaczynające się od '#' oraz puste linie są ignorowane.
+
+# --- Polskie serwisy (krajowe) ---
+tvn24.pl
+onet.pl
+wp.pl
+rp.pl
+interia.pl
+gazeta.pl
+
+# --- Globalne Agencje Prasowe ---
+apnews.com
+reuters.com
+bbc.com
+aljazeera.com
+dw.com
+france24.com
+theguardian.com
+
+# --- Analizy Geopolityczne i Biznes ---
+nytimes.com
+bloomberg.com
+ft.com
+economist.com
+wsj.com
+politico.com
+politico.eu
+axios.com
+
+# --- Państwowe Agencje Prasowe ---
+pap.pl
+tass.com
+xinhuanet.com
+aa.com.tr
+irna.ir
+wam.ae
+afp.com
+efe.com
+kyodonews.net
+yna.co.kr
+spa.gov.sa
+
+
+# --- Rekomendowane Nowe Źródła GDELT ---
+euronews.com
+independent.co.uk
+elpais.com
+kyivpost.com
+pravda.com.ua
+unian.net
+scmp.com
+channelnewsasia.com
+straitstimes.com
+jpost.com
+arabnews.com
+cbc.ca
